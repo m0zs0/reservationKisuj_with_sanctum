@@ -1,6 +1,6 @@
-III. felvonás Authentikáció beállítása
+III. felvonás Sanctum Authentikáció beállítása
 
-A. Laravel Sanctum (Bearer Token alapú)
+A. Bearer Token alapú
 
 Egyszerűbb megoldás API-hoz készítesz.
 Sanctum támogatja a token alapú autentikációt és a session alapú autentikációt is.
@@ -9,8 +9,7 @@ Hátránya: nem tartalmaz beépített token lejárati időt (de megoldható manu
 
 
 A1) Sanctum telepítése és konfigurálása
-
--adjuk hozzá a szükséges függőségeket
+-adjuk hozzá a szükséges függőségeket 
   composer require laravel/sanctum
 -a personal_access_tokens nevű táblát a Laravel Sanctum hozza létre az alábbi paranccsal
   php artisan vendor:publish --provider="Laravel\Sanctum\SanctumServiceProvider"
@@ -25,7 +24,8 @@ class User extends Authenticatable
     /** @use HasFactory<\Database\Factories\UserFactory> */
     use HasApiTokens, HasFactory, Notifiable;
 …
--AuthController létrehozása
+
+A2) AuthController létrehozása és megírása
   php artisan make:controller AuthController
 -app/Http/Controllers/AuthController.php megírása (register, login, logout):
 <?php
@@ -99,7 +99,8 @@ class AuthController extends Controller
     }
 }
 
--app/routes/api.php módosítása
+
+A3) app/routes/api.php módosítása
 A middleware egy szűrő, ami a HTTP kérés és a controller között fut.
 Példa: auth:sanctum middleware ellenőrzi, hogy a felhasználó hitelesítve van-e.
 Ha nem → 401 (Unauthorized).
@@ -110,7 +111,7 @@ Route::middleware()->post(...) //Mi ezt fogjuk használni, mert group-osnál ez 
 vagy
 Route::post(...)-> middleware()
 
-Csoprtos végpont létrehozása:
+Csoportos végpont létrehozása:
 Route::middleware('auth:sanctum')->group(function (){...});  //ahogyan alább látszik
 
 
@@ -163,7 +164,7 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::apiResource('reservations', ReservationController::class);
 });
 
--tesztelés POSTMAN-nel
+A4) tesztelés POSTMAN-nel
 register()
     POST http://localhost:8000/api/register
          Headers: Content-Type: application/json; Accept: application/json
@@ -180,8 +181,309 @@ register()
          -> "Sikeres kijelentkezés!"
 
 
-B. JWT (JSON Web Token)
+A5) feladat újragondolása:
+Legyen egy admin, aki minden foglalást lát
+Minden user csak a saját foglalásait tudja kezelni
 
-Komplexebb, de iparági standard API autentikációhoz.
-Előnye: tokenek önmagukban hordozzák az információt, lejárati időt, és könnyen használhatók több szolgáltatás között.
-Hátránya: külső csomag kell (pl. tymon/jwt-auth), és kicsit több konfiguráció.
+Users                                     Reservations
+id   -1------------\                      id
+name                \-----------------N-  user_id
+email                                     reservation_time
+password                                  guests
+is_admin                                  note
+
+
+-a régi adattáblákat töröljük ki.
+
+-A User osztály átalakítása
+--Users tábla migrációjának módosítása:
+  $table->boolean('is_admin')->default(false); 
+--User.php módosítása
+class User extends Authenticatable
+{
+    /** @use HasFactory<\Database\Factories\UserFactory> */
+    use HasApiTokens, HasFactory, Notifiable;
+
+    /**
+     * The attributes that are mass assignable.
+     *
+     * @var list<string>
+     */
+    protected $fillable = [
+        'name',
+        'email',
+        'password',
+        'is_admin',
+    ];
+    
+    public function reservations()
+    {
+        return $this->hasMany(Reservation::class);
+    }
+
+
+--UserFactory.php módosítása (ez nem is kell igazából):
+return [
+            'name' => fake()->name(),
+            'email' => fake()->unique()->safeEmail(),
+            'email_verified_at' => now(),
+            'password' => static::$password ??= Hash::make('password'),
+            'remember_token' => Str::random(10),
+            'is_admin' => false,
+        ];
+--DatabaseSeeder módosítása:
+    public function run(): void
+       {
+	User::factory()->create([
+            'name' => 'Admin',
+            'email' => 'admin@example.com',
+            'password' => bcrypt('admin'), // ugyanazt csinálja mint a Hash::make('admin')
+            'is_admin' => true,
+        ]);
+
+        User::factory()->create([
+            'name' => 'Mozso',
+            'email' => 'mozso@example.com',
+            'is_admin' => false,
+        ]);
+
+-A Reservation osztály átalakítása
+
+--Reservation migráció átalakítása
+
+public function up(): void
+    {
+        Schema::create('reservations', function (Blueprint $table) {
+            $table->id();
+            $table->unsignedBigInteger('user_id');
+            $table->dateTime('reservation_time'); 
+            $table->integer('guests'); // vendégek száma
+            $table->string('note')->nullable(); // megjegyzés
+            $table->timestamps();
+            // Idegen kulcs beállítása
+            $table->foreign('user_id')->references('id')->on('users')->onDelete('cascade');
+        });
+    }
+
+--Reservation.php módosítása
+
+class Reservation extends Model
+{
+    use HasFactory;
+    protected $fillable = [
+        'user_id',
+        'reservation_time',
+        'guests',
+        'note',
+    ];
+    
+    public function user()
+    {
+        return $this->belongsTo(User::class);
+    }
+}
+
+--ReservationFactory átalakítása:
+class ReservationFactory extends Factory
+{
+    /**
+     * Define the model's default state.
+     *
+     * @return array<string, mixed>
+     */
+    public function definition(): array
+    {
+        
+        return [
+            'user_id' => User::inRandomOrder()->first()->id,
+            'reservation_time' => $this->faker->dateTimeBetween('+1 days', '+1 month'),
+            'guests' => $this->faker->numberBetween(1, 10),
+            'note' => $this->faker->sentence(),
+        ];
+    }
+}
+
+--ReservationSeeder.php átalakítása
+class ReservationSeeder extends Seeder
+{
+    /**
+     * Run the database seeds.
+     */
+    public function run(): void
+    {
+        Reservation::factory()->count(10)->create();
+        
+        Reservation::create([
+            'user_id' => 1,
+            'reservation_time' => '2025-11-10 18:00:00',
+            'guests' => 4,
+            'note' => 'Születésnapi vacsora',
+        ]);
+
+    }
+}
+
+
+-migráció futtatása:
+php artisan migrate
+
+-seeder futtatása
+php artisan db:seed
+
+
+-Authcontroller.php-ben
+register()nél:
+$user = User::create([
+            'name' => $request->name,
+            'email' => $request->email,
+            'password' => Hash::make($request->password),
+            'is_admin' => false, // regisztrálni nem lehet adminként
+        ]);
+
+-ReservationController.php-ben:
+<?php
+
+namespace App\Http\Controllers\Api;
+
+use App\Http\Controllers\Controller;
+use Illuminate\Http\Request;
+use App\Models\Reservation;
+
+class ReservationController extends Controller
+{
+    
+    public function index(Request $request)
+    {
+        $user = $request->user();
+
+        if ($user->is_admin) {
+            // Admin látja az összes foglalást
+            $reservations = Reservation::all();
+        } else {
+            // Normál user csak a saját foglalásait
+            $reservations = Reservation::where('user_id', $user->id)->get();
+        }
+
+        return response()->json($reservations, 200);
+    }
+
+    
+    public function show(Request $request, $id)
+    {
+        $user = $request->user();
+        $reservation = Reservation::findOrFail($id);
+        
+        
+        if (!$user->is_admin && $reservation->user_id !== $user->id) {
+            return response()->json(['message' => 'Unauthorized'], 403);
+        }
+        return response()->json($reservation, 200); 
+    }
+
+    public function store(Request $request)
+    {
+        $validated = $request->validate([
+            'reservation_time' => 'required|date',
+            'guests' => 'required|integer|min:1',
+            'note' => 'nullable|string',
+        ]);
+
+        $reservation = Reservation::create([
+            'user_id' => $request->user()->id,
+            'reservation_time' => $validated['reservation_time'],
+            'guests' => $validated['guests'],
+            'note' => $validated['note'] ?? null,
+        ]);
+        return response()->json($reservation, 201);
+    }
+
+    
+public function update(Request $request, $id)
+    {
+        $user = $request->user();
+        $reservation = Reservation::findOrFail($id);
+
+        
+        if (!$user->is_admin && $reservation->user_id !== $user->id) {
+            return response()->json(['message' => 'Unauthorized'], 403);
+        }
+
+        $validated = $request->validate([
+            'reservation_time' => 'sometimes|required|date',
+            'guests' => 'sometimes|required|integer|min:1',
+            'note' => 'nullable|string',
+        ]);
+
+        //sometimes: csak akkor validálja, ha az adott mező benne van a kérésben, required: ha benne van, akkor nem lehet üres.
+
+        $reservation->update($validated);
+
+        return response()->json($reservation, 200);
+    }
+
+    public function destroy(Request $request, $id)
+    {
+        $user = $request->user();
+        $reservation = Reservation::findOrFail($id);
+        
+        if (!$user->is_admin && $reservation->user_id !== $user->id) {
+            return response()->json(['message' => 'Unauthorized'], 403);
+        }
+
+        $reservation->delete();
+        return response()->json(['message' => 'Foglalás törölve.'], 200);
+    }
+}
+
+
+
+------------------POLICY--EZT nem próbáltam ki----------------------
+A reservationControllerben lévő sok authentikációt ellenőrző if helyett lehetett volna Policy-t használni.
+
+php artisan make:policy ReservationPolicy --model=Reservation
+
+-Policy metódusok:
+
+public function view(User $user, Reservation $reservation)
+{
+    return $user->is_admin || $reservation->user_id === $user->id;
+}
+
+public function update(User $user, Reservation $reservation)
+{
+    return $user->is_admin || $reservation->user_id === $user->id;
+}
+
+public function delete(User $user, Reservation $reservation)
+{
+    return $user->is_admin || $reservation->user_id === $user->id;
+}
+
+-ControllerMetódusok módosítása
+public function show(Reservation $reservation)
+{
+    $this->authorize('view', $reservation);
+    return response()->json($reservation);
+}
+
+public function update(Request $request, Reservation $reservation)
+{
+    $this->authorize('update', $reservation);
+    $reservation->update($request->validate([...]));
+    return response()->json($reservation);
+}
+
+public function destroy(Reservation $reservation)
+{
+    $this->authorize('delete', $reservation);
+    $reservation->delete();
+    return response()->json(['message' => 'Deleted']);
+}
+
+
+------------------------------------------------
+
+TESZTELÉS
+-AuthController tesztek: Cél: Ellenőrizni, hogy a regisztráció, bejelentkezés és kijelentkezés működik.
+
+
