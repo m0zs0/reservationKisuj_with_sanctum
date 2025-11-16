@@ -9,24 +9,175 @@ Hátránya: nem tartalmaz beépített token lejárati időt (de megoldható manu
 
 
 A1) Sanctum telepítése és konfigurálása
-Middleware és route-ok beállítása
-AuthController létrehozása (register, login, logout)
-Token generálás és használat API hívásokban
-Tesztelés Postman-ben
+
+-adjuk hozzá a szükséges függőségeket
+  composer require laravel/sanctum
+-a personal_access_tokens nevű táblát a Laravel Sanctum hozza létre az alábbi paranccsal
+  php artisan vendor:publish --provider="Laravel\Sanctum\SanctumServiceProvider"
+-migrációk futtatása
+  php artisan migrate
+-User.php model frissítése:
+...
+use Laravel\Sanctum\HasApiTokens;
+
+class User extends Authenticatable
+{
+    /** @use HasFactory<\Database\Factories\UserFactory> */
+    use HasApiTokens, HasFactory, Notifiable;
+…
+-AuthController létrehozása
+  php artisan make:controller AuthController
+-app/Http/Controllers/AuthController.php megírása (register, login, logout):
+<?php
+
+namespace App\Http\Controllers;
+
+use Illuminate\Http\Request;
+use App\Models\User;
+use Illuminate\Support\Facades\Hash;
+
+class AuthController extends Controller
+{
+    /**
+     * Regisztráció
+     */
+    public function register(Request $request)
+    {
+        $request->validate([
+            'name' => 'required|string|max:255',
+            'email' => 'required|email|unique:users,email',
+            'password' => 'required|min:6'
+        ]);
+
+        $user = User::create([
+            'name' => $request->name,
+            'email' => $request->email,
+            'password' => Hash::make($request->password)
+        ]);
+
+        return response()->json([
+            'message' => 'User regisztrációja kész!',
+            'user' => $user
+        ], 201);
+    }
+
+    /**
+     * Bejelentkezés és token generálás
+     */
+    public function login(Request $request)
+    {
+        $request->validate([
+            'email' => 'required|email',
+            'password' => 'required'
+        ]);
+
+        $user = User::where('email', $request->email)->first();
+
+        if (!$user || !Hash::check($request->password, $user->password)) {
+            return response()->json(['message' => 'Invalid credentials'], 401);
+        }
+
+        // Token létrehozása
+        $token = $user->createToken('auth_token')->plainTextToken;
+
+        return response()->json([
+            'access_token' => $token,
+            'token_type' => 'Bearer'
+        ]);
+    }
+
+    /**
+     * Kijelentkezés (összes token törlése)
+     */
+    public function logout(Request $request)
+    {
+        $request->user()->tokens()->delete();
+
+        return response()->json([
+            'message' => 'Logged out successfully'
+        ]);
+    }
+}
+
+-app/routes/api.php módosítása
+A middleware egy szűrő, ami a HTTP kérés és a controller között fut.
+Példa: auth:sanctum middleware ellenőrzi, hogy a felhasználó hitelesítve van-e.
+Ha nem → 401 (Unauthorized).
+Ha igen → továbbengedi a kérést a controllerhez.
+
+Egyedi, védett végpont létrehozása (a két utasítás ekvivalens egymással):
+Route::middleware()->post(...) //Mi ezt fogjuk használni, mert group-osnál ez működik csak
+vagy
+Route::post(...)-> middleware()
+
+Csoprtos végpont létrehozása:
+Route::middleware('auth:sanctum')->group(function (){...});  //ahogyan alább látszik
 
 
+<?php
+use App\Http\Controllers\AuthController;
+use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Route;
+use App\Http\Controllers\Api\ReservationController;
 
 
+// Teszt endpoint (nyilvános)
+Route::get('/hello', function () {
+    return response()->json(['message' => 'Hello API']);
+});
+
+// Auth endpointok (nyilvános)
+Route::post('/register', [AuthController::class, 'register']);
+Route::post('/login', [AuthController::class, 'login']);
+
+// Védett endpointok (auth:sanctum middleware)
+Route::middleware('auth:sanctum')->group(function () {
+    Route::post('/logout', [AuthController::class, 'logout']);
+
+    // Reservation API végpontok (csak bejelentkezett felhasználóknak)
+    Route::get('/reservations', [ReservationController::class, 'index']);         // Összes foglalás
+    Route::get('/reservations/{id}', [ReservationController::class, 'show']);     // Egy foglalás lekérdezése
+    Route::post('/reservations', [ReservationController::class, 'store']);        // Új foglalás létrehozása
+    Route::put('/reservations/{id}', [ReservationController::class, 'update']);   // Foglalás minden mezőjének módosítása
+    Route::patch('/reservations/{id}', [ReservationController::class, 'update']); // Foglalás adott mezőjének módosítása
+    Route::delete('/reservations/{id}', [ReservationController::class, 'destroy']); // Foglalás törlése
+});
+
+DE ezen lehet rövidíteni:
+
+Az apiResource() automatikusan létrehozza:
+GET /reservations → index()
+GET /reservations/{id} → show()
+POST /reservations → store()
+PUT /reservations/{id} → update()
+PATCH /reservations/{id} → update()
+DELETE /reservations/{id} → destroy()
+
+így a csoportos útvonalak a következőképpen vonhatók össze:
 
 
+Route::middleware('auth:sanctum')->group(function () {
+    Route::post('/logout', [AuthController::class, 'logout']);
 
+    // Reservation API végpontok rövidítve
+    Route::apiResource('reservations', ReservationController::class);
+});
 
-
-
-
-
-
-
+-tesztelés POSTMAN-nel
+register()
+    POST http://localhost:8000/api/register
+         Headers: Content-Type: application/json; Accept: application/json
+         Body raw JSON: {"name":"monoki","email":"monoki@example.com","password":"Jelszo_2025", "password_confirmation": "Jelszo_2025"}
+	 -> "User regisztrációja kész!"	
+  login()
+    POST http://localhost:8000/api/login
+         Headers: Content-Type: application/json; Accept: application/json
+         Body raw JSON: {"email":"monoki@example.com","password":"Jelszo_2025"}
+	 -> "Bearer" "1|xgTuLgQ6q0DESOQsDqCC5FKicoaa0rKX2G..."
+  logout()
+    POST http://localhost:8000/api/logout
+         Headers: Content-Type: application/json; Accept: application/json; Authorization: "Bearer 1|xgTuLgQ6q0DESOQsDqCC5FKicoaa0rKX2G..."
+         -> "Sikeres kijelentkezés!"
 
 
 B. JWT (JSON Web Token)
