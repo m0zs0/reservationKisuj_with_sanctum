@@ -562,7 +562,7 @@ class AuthControllerTest extends TestCase
 
 }
 
-php artsan test
+php artisan test
 
 
 -ReservationController tesztek: Cél: CRUD műveletek tesztelése, jogosultságokkal együtt.
@@ -799,5 +799,20 @@ class ReservationAccessTest extends TestCase
         $response->assertStatus(403);
     }
 }
+
+
+
+DOKUMENTÁLÁS
+------------
+-Postman collection
+composer require knuckleswtf/scribe --dev
+php artisan scribe:generate
+storage/app/private/scribe/collection.json ez lesz a Postman-ba importálható collection
+a Gyűjteményben a baseUrl a Variables fülön módosítani kell: http://127.0.0.1:8000
+
+-README vagy API dokumentáció
+Ha már előzőleg tesztelgettük a végpontokat postman-nal, akkor visszafele dolgozva exportáljuk a json-t, és a Geminivel generáltatunk egy API dokumentációt :)
+
+
 
 
