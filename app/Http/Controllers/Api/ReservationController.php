@@ -87,7 +87,6 @@ public function update(Request $request, $id)
             return response()->json(['message' => 'Unauthorized'], 403);
         }
 
-
         $reservation->delete();
         return response()->json(['message' => 'Foglalás törölve.'], 200);
     }
