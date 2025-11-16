@@ -1,0 +1,36 @@
+III. felvonás Authentikáció beállítása
+
+A. Laravel Sanctum (Bearer Token alapú)
+
+Egyszerűbb megoldás API-hoz készítesz.
+Sanctum támogatja a token alapú autentikációt és a session alapú autentikációt is.
+Előnye: könnyen integrálható, nem igényel külső csomagot.
+Hátránya: nem tartalmaz beépített token lejárati időt (de megoldható manuálisan).
+
+
+A1) Sanctum telepítése és konfigurálása
+Middleware és route-ok beállítása
+AuthController létrehozása (register, login, logout)
+Token generálás és használat API hívásokban
+Tesztelés Postman-ben
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+B. JWT (JSON Web Token)
+
+Komplexebb, de iparági standard API autentikációhoz.
+Előnye: tokenek önmagukban hordozzák az információt, lejárati időt, és könnyen használhatók több szolgáltatás között.
+Hátránya: külső csomag kell (pl. tymon/jwt-auth), és kicsit több konfiguráció.
